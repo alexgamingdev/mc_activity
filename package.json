@@ -1,0 +1,13 @@
+{
+  "name": "mc_activity",
+  "version": "1.0.0",
+  "description": "Discord Activity web application",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.2.1"
+  }
+}
