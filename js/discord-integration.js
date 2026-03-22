@@ -246,7 +246,49 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /*  7. Load app.js dynamically                                          */
+  /*  7. Fix Web Worker path resolution for Discord's proxy context      */
+  /* ------------------------------------------------------------------ */
+
+  function patchWorkerPaths() {
+    // In Discord's Embedded Activity context the page is served through a
+    // proxy (e.g. https://xxx.discordsays.com/.proxy/).  Relative Worker
+    // URLs such as "assets/js/RandomLevelWorker.js" are resolved relative
+    // to the document's current URL, but some environments mis-resolve them
+    // or reject same-origin worker requests when the base path has a prefix.
+    // Converting the relative path to a fully-qualified absolute URL *before*
+    // the browser resolves it ensures the correct resource is fetched and
+    // avoids the Worker being silently skipped (which would block or skip
+    // the "Generating level" phase).
+    var OriginalWorker = window.Worker;
+    if (!OriginalWorker) return; // not supported – nothing to patch
+
+    window.Worker = function (url, options) {
+      if (
+        typeof url === 'string' &&
+        url.indexOf('://') === -1 && // not a scheme-qualified absolute URL
+        url.indexOf('//') !== 0      // not a protocol-relative URL
+      ) {
+        // Resolve relative path against the page's current base URI so that
+        // Discord's proxy prefix is included in the final Worker URL.
+        try {
+          url = new URL(url, document.baseURI).href;
+        } catch (_) {
+          // URL constructor not available – keep the original value.
+        }
+      }
+      return options
+        ? new OriginalWorker(url, options)
+        : new OriginalWorker(url);
+    };
+
+    // Preserve the prototype chain so `instanceof Worker` checks and any
+    // static properties of the original constructor continue to work.
+    Object.setPrototypeOf(window.Worker, OriginalWorker);
+    window.Worker.prototype = OriginalWorker.prototype;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /*  8. Load app.js dynamically                                          */
   /* ------------------------------------------------------------------ */
 
   function loadGameBundle() {
@@ -267,6 +309,12 @@
   // even if the SDK import is slow the CSS protection is already in place.
   patchMobileDetection();
 
+  // Patch the Worker constructor so that relative worker paths are resolved
+  // to absolute URLs before the game bundle runs.  This must happen before
+  // loadGameBundle() so that the patch is in place when app.js creates its
+  // RandomLevelWorker.
+  patchWorkerPaths();
+
   initDiscordSDK()
     .then(function (result) {
       var username = result.username;
@@ -276,6 +324,7 @@
       patchLocalStorage(username, seed);
       patchNetworkUrl(instanceId);
 
+      console.log('Voice-Channel Sync Active - Map Seed: ' + seed);
       console.log(
         '[Discord] Ready – user:', username,
         '| instance:', instanceId,
